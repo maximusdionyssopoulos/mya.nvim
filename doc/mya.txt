@@ -1,0 +1,538 @@
+*mya.txt*   A fugitive-style Agent Client Protocol (ACP) client for Neovim
+
+mya.nvim                                                            *mya.nvim*
+
+An AI coding agent lives at the other end of a JSON-RPC pipe (ACP: the Agent
+Client Protocol). This plugin exposes it the way vim-fugitive exposes Git:
+sessions are addressable `mya://` buffers, not a dashboard-and-dialogs UI
+bolted onto Vim.
+
+Pure Lua, no external dependencies, no build step. Requires Neovim >= 0.10.
+
+CONTENTS                                                          *mya-contents*
+
+    1. Introduction ................ |mya-introduction|
+    2. Setup ....................... |mya-setup|
+    3. Commands .................... |mya-commands|
+    4. Dashboard ................... |mya-dashboard|
+    5. Log buffer .................. |mya-log|
+    6. Plan buffer ................. |mya-plan|
+    7. Compose buffer .............. |mya-compose|
+    8. Review ...................... |mya-review|
+    9. Terminals ................... |mya-terminal|
+    10. Statusline .................. |mya-statusline|
+    11. Health ...................... |mya-health|
+    12. About ....................... |mya-about|
+
+==============================================================================
+1. Introduction                                              *mya-introduction*
+
+Every view is a real buffer, opened through a `mya://<agent>/<session>/<view>`
+URL:
+
+    mya://<agent>/<session>/log      the session transcript (see |mya-log|)
+    mya://<agent>/<session>/plan     the agent's current plan (|mya-plan|)
+
+Rendering is a pure projection of an in-memory, per-session event log fed by
+the same code path whether it came from a live `session/update` notification
+or a `session/load` replay. The log lives only for the lifetime of the
+Neovim instance -- there is no client-side database. Agents that support
+`session/list` (see their own docs) can still show up in |mya-dashboard|
+after a restart; agents that don't have no visible history at all once
+Neovim exits.
+
+==============================================================================
+2. Setup                                                            *mya-setup*
+
+The plugin does nothing until configured with at least one agent: >
+
+    require('mya').setup {
+      agents = {
+        claude = {
+          command = 'claude-code-acp',
+        },
+        gemini = {
+          command = 'gemini',
+          args = { '--experimental-acp' },
+        },
+      },
+    }
+<
+`:checkhealth mya` (|mya-health|) makes this "unconfigured" state loud and
+explicit if you forget.
+
+Full option reference (`mya.Config`, defaults shown): >
+
+    require('mya').setup {
+      agents = {},           -- table<string, AgentConfig>; see below
+      log = {
+        level = 'info',      -- "trace"|"debug"|"info"|"warn"|"error"
+        file = nil,           -- defaults to stdpath('log')..'/mya.log'
+      },
+      notify = {
+        turn_end = true,      -- vim.notify when a prompt turn ends
+        permission = true,    -- vim.notify when a permission is waiting
+      },
+      review = {
+        ui = 'buffer',                 -- "buffer"|"select"
+        open = 'auto',                  -- "auto"|"manual"
+        context_lines = 3,              -- unified-diff context for '=' hunks
+        auto_qf = false,                 -- populate quickfix on permission arrival
+        default_accept_kind = 'allow_once', -- "allow_once"|"allow_always"
+      },
+      ui = {
+        bar = 'statusline',     -- session info on mya:// windows:
+                                 -- 'statusline' (merged into the window's
+                                 -- statusline) | 'winbar' | false
+        log = {
+          context_lines = 3,    -- context lines in rendered tool-call diffs
+          icons = true,         -- status/kind icons on tool-call titles
+        },
+      },
+      keymaps = { ... },        -- buffer-local maps; see |mya-keymaps|
+    }
+<
+                                                                 *mya-keymaps*
+Every buffer-local map is configurable through `keymaps`. Each entry is an
+action name -> lhs; set an action to `false` to remove the map entirely (you
+can then bind your own through the buffer's filetype). Defaults: >
+
+    keymaps = {
+      dashboard = {              -- |mya-dashboard-maps|
+        open = '<CR>',           -- open session log (current window)
+        open_split = 'o',        -- open session log (split)
+        open_vsplit = 'gO',      -- open session log (vsplit)
+        open_tab = 'O',          -- open session log (tab)
+        toggle_preview = '=',    -- toggle inline session preview
+        compose = 'cc',          -- compose a prompt for session under cursor
+        new_session = 'n',       -- new session
+        delete_session = 'D',    -- delete session
+        refresh = 'R',           -- refresh dashboard
+        close = 'q',             -- close dashboard window
+        help = 'g?',             -- open this help section
+      },
+      log = {                    -- |mya-log-maps|
+        jump = '<CR>',           -- jump to tool-call location
+        next_turn = ']]',        -- next turn header
+        prev_turn = '[[',        -- previous turn header
+        compose = 'cc',          -- compose a prompt for this session
+        config = 'co',           -- change model/mode/variant
+        review = 'dr',           -- open the review buffer
+        cancel = '<C-c>',        -- cancel the in-flight turn
+        help = 'g?',             -- open this help section
+        close_output = 'q',      -- close a terminal output view
+      },
+      review = {                 -- |mya-review-maps|
+        toggle_hunks = '=',      -- toggle hunk expansion
+        diffsplit = 'dv',        -- open unit under cursor as a diffsplit
+        accept = 'a',            -- accept unit
+        reject = 'r',            -- reject unit
+        compose = 'cc',          -- compose a prompt for this session
+        help = 'g?',             -- open this help section
+        close = 'q',             -- close review (and diffsplit pairs)
+      },
+      compose = {                -- |mya-compose-maps|
+        close = 'q',             -- close the compose window
+        help = 'g?',             -- open this help section
+      },
+    }
+<
+Each entry in `agents` (`mya.AgentConfig`): >
+
+    agents.<name> = {
+      command = '...',        -- required: the agent binary
+      args = {...},            -- optional: CLI args
+      env = { KEY = 'val' },   -- optional: extra environment variables
+      cwd = '...',              -- optional: spawn cwd (defaults to Neovim's)
+      keep_alive = true,        -- optional: false = stop after idle_timeout_ms
+      idle_timeout_ms = 300000, -- optional: only used when keep_alive=false
+      mcp_servers = {           -- optional: passed through on every session/new
+        {
+          name = '...', command = '...', args = {...},
+          env = { KEY = 'val' },  -- map form; normalized to [{name,value}]
+        },
+      },
+      session_delete_command = {...}, -- optional: out-of-band CLI fallback
+                                       -- for deleting sessions; see below
+    }
+<
+                                                  *mya-session_delete_command*
+`session/delete` is optional for agents (capability-gated by
+`sessionCapabilities.delete`), and some agents that list sessions still
+can't delete them over ACP -- opencode, notably. For those,
+`session_delete_command` configures an out-of-band fallback: an argv list
+run when the |mya-dashboard| `D` map is used on one of that agent's
+sessions. Every argument that is exactly `{sessionId}` is replaced with the
+session id (if none is, the id is appended); a `fun(session_id): string[]`
+works too. When the session is live in this Neovim instance and the agent
+advertises `sessionCapabilities.close`, `session/close` is sent first so
+the agent's live handle doesn't resurrect the row in its next
+`session/list`. For opencode: >
+
+    opencode = {
+      command = 'opencode',
+      args = { 'acp' },
+      session_delete_command = { 'opencode', 'session', 'delete', '{sessionId}' },
+    }
+<
+`review.ui = 'select'` swaps the fugitive-style review buffer (|mya-review|)
+for a plain `vim.ui.select` prompt on every permission request -- useful for
+minimal setups or as a fallback UI.
+
+==============================================================================
+3. Commands                                                      *mya-commands*
+
+                                                                        *:Mya*
+:Mya                    With no arguments, opens (or focuses) the session
+                         |mya-dashboard|.
+
+:Mya new {agent}                                                 *:Mya_new*
+                         Start a new session with {agent} (`session/new`)
+                         and open its log buffer.
+
+:Mya open {agent}[/{id}]                                        *:Mya_open*
+                         Open a session log in the current window without
+                         going through the dashboard. With a bare {agent},
+                         opens its most recently updated known session.
+                         Tab-completes `agent` and `agent/<session-id>`
+                         against in-memory sessions plus the last fetched
+                         `session/list` result (fetching happens when the
+                         dashboard opens; completion never blocks on a
+                         round-trip).
+
+                                                      *mya-current-session*
+Session-scoped subcommands (`send`, `cancel`, `include`, `config`, `qf`,
+`review`) act on the AMBIENT CURRENT SESSION and therefore work from any
+buffer, fugitive-style: the current buffer's session when it has one (an
+`mya://` view or a compose buffer), otherwise the session buffer you most
+recently entered.
+
+:{range}Mya send [{text}]                                       *:Mya_send*
+                         Send a prompt to the current session. With {text},
+                         sends immediately (your shell-history-like prompt
+                         history is the cmdline history, |q:|). Without
+                         {text}, opens the |mya-compose| buffer -- the
+                         `:Git commit` / `:Git commit -m` split. With a
+                         range, first stages those lines of the current
+                         buffer as context (exactly like |:Mya_include|),
+                         so `:'<,'>Mya send explain this` works from any
+                         file buffer.
+
+:Mya cancel                                                    *:Mya_cancel*
+                         Cancel the in-flight turn of the current session
+                         (`session/cancel`). Same as |mya-C-c| in the log
+                         buffer.
+
+:{range}Mya include [{path} ...]                              *:Mya_include*
+                         Stage context for the NEXT prompt sent to the
+                         current session (see |mya-current-session|):
+                           - `:Mya include` with no args and no range:
+                             attaches the whole current buffer's file.
+                           - `:Mya include path1 path2 ...`: attaches each
+                             file by path (tab-completes file paths).
+                           - `:{range}Mya include` (a range, no paths):
+                             attaches those lines of the current buffer.
+                         Staged blocks show as real `# staged: <label>`
+                         comment lines below the compose buffer's draft
+                         (gitcommit-style): delete a line to unstage that
+                         block. The lines are stripped from the sent
+                         message, and staging is cleared after each submit.
+
+:Mya config                                                    *:Mya_config*
+                         Open a `vim.ui.select` picker over the session's
+                         config options (model, effort/thinking, ...) or,
+                         lacking those, its deprecated `modes`. Same as |cco|
+                         in the log buffer.
+
+:Mya qf                                                            *:Mya_qf*
+                         Fill the quickfix list with every edit/delete/move
+                         tool call in the session's history so far (one
+                         entry per file diff), and `:copen` if non-empty.
+
+:Mya review                                                    *:Mya_review*
+                         Open (or focus) the review buffer (|mya-review|)
+                         for the current session -- e.g. to reopen it after
+                         `q`, or with `review.open = 'manual'`. Same as
+                         |mya-dr| in the log buffer.
+
+:Mya log                                                          *:Mya_log*
+                         Open the plugin's own rpc/trace log file
+                         (`require('mya.util').log_path()`, defaults to
+                         `stdpath('log')/mya.log`) in a split, for debugging
+                         the protocol traffic itself. Notifies instead if no
+                         log file exists yet. Works from any buffer.
+
+Tab-completion is wired for the subcommand name, `:Mya new <agent>` (against
+configured agent names), `:Mya open <agent>/<id>` (against known sessions),
+`:Mya include <path>` (file paths), and `:Mya send /<command>` (against the
+current session's `available_commands`). Agent slash commands are ordinary
+prompt text on the wire (the agent parses the leading `/<name>` itself), so
+the cmdline is their one completion surface -- there is no in-buffer slash
+magic.
+
+==============================================================================
+4. Dashboard                                                    *mya-dashboard*
+
+`:Mya` opens a scratch buffer (NOT an `mya://` buffer) named `mya-dashboard`.
+Like fugitive's `:G` status window, it is organized around what needs YOU,
+not around a directory listing:
+
+    Needs review:   sessions blocked on a permission request; each pending
+                    tool call's title renders as an indented child line
+    Running:        sessions with a prompt in flight (spinner indicator)
+    Sessions:       everything else, most recently updated first
+    Agents:         one line per configured agent -- ready / loading… /
+                    an error / "(no session listing)"
+
+On every open/refresh, each configured agent is initialized and its
+`session/list` fetched (paginating through all cursors) if it advertises
+the capability; agents that don't contribute only sessions created THIS
+instance.
+
+Each row shows: a live-status indicator, title (or session id), agent name,
+rendered line count, known model/effort/other config options, a relative
+last-updated time, and a status word. A session that a `session/list`
+reported but that this instance never created and the agent doesn't support
+`session/load` for renders dimmed with "not resumable" -- there is no cached
+transcript to fall back on.
+
+                                                            *mya-dashboard-maps*
+Maps in the dashboard buffer (fugitive open vocabulary; the keys shown are
+the defaults -- see |mya-keymaps| to change or disable any of them):
+
+    <CR>       Open the session log under the cursor in THIS window.
+    o          Open the session log in a new split.
+    gO         Open the session log in a new vertical split.
+    O          Open the session log in a new tab.
+    =          Toggle an inline preview under the row: pending tool-call
+               edits and the last message's first line (in-memory
+               sessions only).
+    cc         Open the |mya-compose| buffer for the session under the
+               cursor (in-memory sessions only).
+    n          Start a new session: for the agent line or session row
+               under the cursor, or via `vim.ui.select` elsewhere.
+    D          Delete the session under the cursor (confirms first).
+               Sends `session/delete` when the agent advertises the
+               capability; otherwise runs the agent's
+               |mya-session_delete_command| CLI fallback; otherwise warns.
+    R          Refresh (re-fetch `session/list` for every agent).
+    q          Close the dashboard window (never the last window).
+    g?         Jump to this section of the manual (like fugitive's g?).
+
+==============================================================================
+5. Log buffer                                                        *mya-log*
+
+`mya://<agent>/<session>/log` is the session transcript: one folded buffer,
+two readings. Prompts, agent replies, reasoning, tool calls (with a status
+icon, kind icon, title, diff stat, and any `locations`), and plan updates
+are all rendered as they stream in.
+
+Folds are computed as each event renders: reasoning blocks and tool-call
+detail are foldable (`foldlevel=99` by default, so everything starts open).
+Use the BUILT-IN Vim commands `zM` (close all -- the "clean" transcript:
+prompts and top-line replies only) and `zR` (open all) to switch readings;
+there is no separate URL for the clean view. `gf` also works on paths
+(tuned via `'path'`/`'includeexpr'` against the session's cwd) -- another
+built-in, not a plugin map.
+
+                                                                 *mya-log-maps*
+Maps in the log buffer (defaults; configurable via |mya-keymaps|):
+
+    <CR>       On a tool-call location line (`  ↳ path[:line]`), jump to
+               it (opens a split if there's no obvious "previous window").
+               On a `[terminal <id>]` content line (see |mya-terminal|),
+               open a live output viewer for that terminal instead.
+    ]]         Jump to the next turn header (`## user` or `## agent`).
+    [[         Jump to the previous turn header.
+    cc         Compose a prompt for this session -- opens the |mya-compose|
+               buffer (`:w` sends).
+    co                                                                *cco*
+               Change model/effort/mode for this session (same as
+               |:Mya_config|).
+    dr                                                             *mya-dr*
+               Open (or focus) the review buffer for this session (same
+               as |:Mya_review|).
+    <C-c>                                                          *mya-C-c*
+               Cancel the in-flight turn (`session/cancel`; same as
+               |:Mya_cancel|).
+    g?         Jump to this section of the manual (like fugitive's g?).
+
+==============================================================================
+6. Plan buffer                                                      *mya-plan*
+
+`mya://<agent>/<session>/plan` renders the session's current plan (if any)
+as a checkbox list: `[ ]` pending, `[~]` in progress, `[x]` completed, with
+a `(!)` suffix on high-priority entries. Re-renders in full on every `plan`
+update -- plans are small enough that incremental diffing isn't worth it.
+It has no buffer-local maps of its own; use |:Mya_send| etc. from the
+session's log buffer.
+
+==============================================================================
+7. Compose buffer                                    *mya-compose* *mya-prompt*
+
+Composing a prompt follows the `gitcommit` model, not the chat-widget
+model. `cc` from the log buffer (or the review buffer, |mya-review|), the
+dashboard's `cc`, or a bare `:Mya send` opens a scratch window
+(`buftype=acwrite`, `filetype=mya-compose`, named
+`mya-compose://<agent>/<session>`) split below the current window. The
+WHOLE buffer is the message; edit it like any buffer, then:
+
+    :w         Submit the message (|BufWriteCmd|). The draft is cleared.
+    :wq        Submit and close the window.
+
+                                                             *mya-compose-maps*
+There are deliberately NO insert-mode maps: <CR> inserts a newline like
+anywhere else, <Tab> is whatever you've configured, and your completion
+plugin attaches through the stable `mya-compose` filetype exactly as it
+does for any other buffer. Native |i_CTRL-X_CTRL-F| completes file paths
+out of the box. The two normal-mode maps (defaults; configurable via
+|mya-keymaps|):
+
+    q          Close the compose window (keeps the buffer and its draft,
+               `bufhidden=hide`).
+    g?         Jump to this section of the manual (like fugitive's g?).
+
+                                                          *mya-compose-context*
+Prompt text is sent VERBATIM -- mya.nvim never scans it for `@path` tokens
+(an `@name` may well be an agent-side subagent mention; what the agent
+should read a file for, you attach explicitly). Context attachment is
+always explicit and visible: |:Mya_include| and `:{range}Mya send` stage
+`resource` content blocks that show as real `# staged: <label>` comment
+lines below the draft (gitcommit-style). Delete a `# staged:` line to
+unstage that block; on submit the managed lines are stripped from the sent
+message, and staging is cleared. Only the exact `# staged: ` prefix is
+stripped -- a markdown `# heading` in your draft is ordinary prompt text.
+
+For building your own integration: >
+
+    require('mya.ui.prompt').is_prompt_buf(bufnr)
+    require('mya.ui.prompt').session_for_buf(bufnr)
+    require('mya.ui.prompt').resolve(bufnr)   -- the ambient current session
+<
+
+==============================================================================
+8. Review                                                          *mya-review*
+
+Edits ride the same flow as `session/request_permission`: review granularity
+is the TOOL CALL, not the individual file or hunk -- a multi-file tool call
+is accepted or rejected as one atomic unit (per-hunk accept/reject is
+explicitly out of scope for now). The review buffer (`mya-review://...`,
+NOT an `mya://` buffer) opens automatically when a permission arrives
+(config `review.open = 'auto'`, the default) unless `review.ui = 'select'`,
+in which case a plain `vim.ui.select` prompt is used instead and no review
+buffer is created. Reopen (or focus) it any time with |:Mya_review| or
+|mya-dr| from the log buffer.
+
+Layout, newest pending tool call first, then applied history: >
+
+    ⏺ <tool title> (<n> files)
+      M path (+a −d)
+        @@ -a,b +c,d            <- '=' toggles this inline hunk expansion
+        +added line
+        -removed line
+
+    applied (read-only):
+    ✓ <tool title> (<n> files)
+      M path (+a −d)
+<
+The "applied (read-only)" section lists every COMPLETED tool call in the
+session's history that carried a diff: units answered earlier, plus edits
+from agents that apply changes themselves without ever requesting
+permission (e.g. opencode with edit permissions allowed -- nothing pends;
+the file is already on disk by the time the diff renders). `=` and `dv`
+work on these entries; `a`/`r` refuse them.
+                                                             *mya-review-maps*
+Maps in the review buffer (defaults; configurable via |mya-keymaps|):
+
+    =          Toggle inline hunk expansion for the file under the cursor.
+    dv         Open a diffsplit pair for the file under the cursor: current
+               buffer-or-disk content vs. the proposed new content, both
+               `:diffthis`. `q` in either scratch window closes the pair.
+    a          Accept the tool call under the cursor (or the oldest
+               pending one if the cursor isn't on a unit) -- applies every
+               file atomically (buffer edit where loaded, so it's
+               undoable in ONE step; disk write otherwise) and answers the
+               permission.
+    r          Reject the tool call the same way -- discards every file
+               change and answers the permission with a reject option.
+    cc         Compose a prompt for this session (|mya-compose|, `:w`
+               sends).
+    g?         Jump to this section of the manual (like fugitive's g?).
+    q          Close the review window (never the last window).
+
+Accepted/rejected tool calls also drive `:Mya qf` (|:Mya_qf|) and an
+automatic quickfix populate on arrival when `review.auto_qf = true`.
+
+==============================================================================
+9. Terminals                                                     *mya-terminal*
+
+The client advertises the `terminal` capability, so agents may run commands
+via `terminal/create`/`terminal/output`/`terminal/wait_for_exit`/
+`terminal/kill`/`terminal/release` instead of (or alongside) the permission-
+gated `execute` tool-call kind. Output is captured into a per-terminal
+buffer capped at the agent-requested `outputByteLimit`, dropping from the
+FRONT once exceeded (a sticky `truncated` flag records that it happened).
+
+Cancelling a turn or a whole session does NOT kill its terminals -- the
+protocol intentionally leaves them running. An agent process crashing DOES
+kill every terminal it owns (there would otherwise be no way to ever reach
+that child process again).
+
+A tool call that embeds a `{type = 'terminal', terminalId = ...}` content
+item renders as a `[terminal <id>]` line in the |mya-log| buffer; `<CR>` on
+that line (see |mya-log-maps|) opens a small read-only scratch buffer named
+`mya-terminal://<id>` showing that terminal's current output, live-updating
+on every output chunk and once more on exit. `q` closes it (the buffer
+itself survives in the background; `<CR>` again reopens the same viewer).
+
+==============================================================================
+10. Statusline                                                *mya-statusline*
+
+`require('mya').statusline([bufnr])` is a pure, cheap projection of a
+session's in-memory state into one line, e.g.: >
+
+    claude-sonnet · high · 42% ctx · gemini · $0.13
+<
+Parts (space-`·`-separated), each independently omitted when unknown:
+model, effort/thinking, every other config option the agent lists, context
+usage percent (from `usage_update`), agent name, and cost. With a `bufnr`
+that resolves to an `mya://.../log` buffer, an extra `"<N> lines"` part is
+appended (the buffer's rendered line count).
+
+When `ui.bar = 'statusline'` (the default), every window showing an `mya://`
+buffer gets a window-local 'statusline' that keeps the stock layout
+(filename, flags, ruler) and adds this component right-aligned before the
+ruler -- it inherits your colorscheme's |hl-StatusLine| highlight, so it
+looks like every other statusline. `ui.bar = 'winbar'` instead shows the
+bare component in a |winbar| at the top of the window; `false` disables the
+built-in wiring entirely. To use it in your own statusline/winbar (the plain
+`%{}` form -- `%{%...%}` would re-parse the `%` in "42% ctx" as an item): >
+
+    vim.o.statusline = "%{v:lua.require('mya').statusline()}"
+<
+==============================================================================
+11. Health                                                        *mya-health*
+
+`:checkhealth mya` reports, WITHOUT ever spawning an agent itself:
+  - whether this Neovim satisfies the >= 0.10 requirement;
+  - whether `require('mya').setup()` has been called yet (loudly warns if
+    not -- see |mya-setup|);
+  - per configured agent: whether its `command` resolves to an executable;
+  - if that agent's process HAPPENS to already be running (because you
+    opened `:Mya` or a session this Neovim instance), its negotiated
+    capabilities: `loadSession`, session-list support, and any Session
+    Config Options seen on a session so far. Otherwise: "not running --
+    capabilities unknown (open :Mya to spawn)".
+
+==============================================================================
+12. About                                                          *mya-about*
+
+mya.nvim is pure Lua: no native/Rust core, no build step, no dependencies
+beyond Neovim >= 0.10 (`vim.uv`, `vim.json`, `vim.diff`, `vim.ui.select`).
+It speaks the Agent Client Protocol (https://agentclientprotocol.com) over
+newline-delimited JSON-RPC on the agent subprocess's stdio.
+
+Out of scope (no protocol support): conversation forking, edit-and-retry,
+per-hunk accept/reject.
+
+ vim:tw=78:ts=8:noet:ft=help:norl:

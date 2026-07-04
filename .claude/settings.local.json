@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:agentclientprotocol.com)",
+      "Bash(curl -s \"https://api.github.com/repos/zed-industries/agent-client-protocol/contents/schema\")",
+      "Bash(curl -sL \"https://api.github.com/repositories/1007251296\")",
+      "Bash(curl -sL \"https://api.github.com/repositories/1007251296/contents/schema\")",
+      "Bash(curl -sL \"https://api.github.com/repos/agentclientprotocol/agent-client-protocol/contents/schema/v1\")",
+      "Bash(curl -sL -o acp-v1-schema.json https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/v1/schema.json)",
+      "Bash(curl -sL -o acp-v1-meta.json https://raw.githubusercontent.com/agentclientprotocol/agent-client-protocol/main/schema/v1/meta.json)",
+      "Bash(python3 -c ' *)",
+      "Bash(apt-get install *)",
+      "Bash(nvim --version)",
+      "Bash(jq --version)",
+      "Bash(mkdir -p /workspace/spec)",
+      "Bash(cp /tmp/claude-0/-workspace/e245f088-7503-40cb-bb10-8394d4f988d8/scratchpad/acp-v1-schema.json /workspace/spec/schema.v1.json)",
+      "Bash(cp /tmp/claude-0/-workspace/e245f088-7503-40cb-bb10-8394d4f988d8/scratchpad/acp-v1-meta.json /workspace/spec/meta.v1.json)",
+      "Bash(git -C /workspace log --oneline -5)",
+      "Bash(git -C /workspace branch -a)",
+      "Bash(nvim --headless -c 'lua local uv=vim.uv; local p=uv.new_pipe\\(false\\); print\\(p\\)' -c 'qa')",
+      "Bash(nvim --headless -c 'lua print\\(vim.fn.stdpath\\(\"log\"\\)\\)' -c 'qa')",
+      "Bash(mkdir -p /workspace/lua/acp /workspace/plugin /workspace/tests)",
+      "Bash(nvim *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(make test *)",
+      "Bash(apt list *)",
+      "Bash(sudo apt-get install -y make)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(git -C /workspace status --short)",
+      "Bash(luacheck lua/ plugin/ tests/)"
+    ]
+  }
+}
