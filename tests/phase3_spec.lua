@@ -419,6 +419,44 @@ T.test('log: render_event pure projections (diff, failed tool, info, plan)', fun
 end)
 
 -- ---------------------------------------------------------------------
+-- 7b. A user message carrying a resource block (a sent `:Mya include`)
+--     renders a visible `» included:` header with the body folded beneath,
+--     not a bare `[resource]` placeholder.
+-- ---------------------------------------------------------------------
+T.test('log: render_event renders an included resource block foldably', function()
+  local r = log.render_event {
+    kind = 'message',
+    role = 'user',
+    content = '[resource]',
+    block = {
+      type = 'resource',
+      resource = {
+        uri = 'file:///tmp/foo.lua#L1-L2',
+        name = 'foo.lua (#L1-L2) — check this',
+        text = 'foo.lua (#L1-L2) — check this:\nlocal a = 1\nlocal b = 2',
+      },
+    },
+  }
+  T.eq(r.lines[1], '» included: foo.lua (#L1-L2) — check this', 'visible header carries the label + note')
+  T.eq(r.folds[1], 0, 'header stays visible under zM')
+  T.ok(r.hl[1].group == 'MyaLogLocation', 'header highlighted as a location')
+  T.eq(r.lines[2], '  foo.lua (#L1-L2) — check this:', 'body indented')
+  for i = 2, #r.lines do
+    T.eq(r.folds[i], 1, 'resource body line ' .. i .. ' folds')
+  end
+  T.ok(r.foldtext[2]:find('included: foo.lua', 1, true) ~= nil, 'fold summary names the include: ' .. tostring(r.foldtext[2]))
+
+  -- A resource with no name falls back to the uri (stripped of file://).
+  local unnamed = log.render_event {
+    kind = 'message',
+    role = 'user',
+    content = '[resource]',
+    block = { type = 'resource', resource = { uri = 'file:///tmp/bar.txt', text = 'hi\n' } },
+  }
+  T.eq(unnamed.lines[1], '» included: /tmp/bar.txt', 'falls back to the uri without the file:// scheme')
+end)
+
+-- ---------------------------------------------------------------------
 -- 8. render_event newline safety (opencode session replay can carry
 --    embedded "\n" in tool_call titles / info text; nvim_buf_set_lines
 --    rejects any replacement line containing "\n").

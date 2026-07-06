@@ -258,6 +258,45 @@ T.test(':Mya include stages a resource block attached on the next build_blocks',
 end)
 
 -- ---------------------------------------------------------------------
+-- 6a. A note travels WITH the include: `:{range}Mya include <note>` embeds
+--     it in the range's resource header, and `:Mya include path -- note`
+--     embeds it in the file's resource text + label.
+-- ---------------------------------------------------------------------
+T.test(':{range}Mya include <note> attaches the note to the range resource', function()
+  prompt.clear_staged(sess1)
+  local tmpfile = vim.fn.tempname() .. '.txt'
+  vim.fn.writefile({ 'alpha line', 'beta line', 'gamma line' }, tmpfile)
+  vim.cmd.edit(tmpfile)
+
+  cmd.run { fargs = { 'include', 'check', 'this', 'off-by-one' }, range = 2, line1 = 1, line2 = 2 }
+
+  local staged = prompt.staged(sess1)
+  T.eq(#staged, 1, 'one staged entry')
+  local res = staged[1].block.resource
+  T.ok(res.text:find('check this off-by-one', 1, true) ~= nil, 'note embedded in resource text: ' .. res.text)
+  T.ok(res.text:find('alpha line', 1, true) ~= nil, 'range content still present')
+  T.ok(res.text:find('gamma', 1, true) == nil, 'lines outside the range excluded')
+  T.ok(staged[1].label:find('check this off-by-one', 1, true) ~= nil, 'note shown in staged label: ' .. staged[1].label)
+end)
+
+T.test(':Mya include path -- note attaches the note to the file resource', function()
+  prompt.clear_staged(sess1)
+  local tmpfile = vim.fn.tempname()
+  vim.fn.writefile({ 'file body line' }, tmpfile)
+
+  cmd.run { fargs = { 'include', tmpfile, '--', 'review', 'error', 'handling' }, range = 0 }
+
+  local staged = prompt.staged(sess1)
+  T.eq(#staged, 1, 'one staged entry')
+  local res = staged[1].block.resource
+  T.eq(res.uri, 'file://' .. tmpfile, 'uri is the pure file path (no note)')
+  T.ok(res.text:find('review error handling', 1, true) ~= nil, 'note prepended to file content: ' .. res.text)
+  T.ok(res.text:find('file body line', 1, true) ~= nil, 'file content still present')
+  T.ok(staged[1].label:find('review error handling', 1, true) ~= nil, 'note shown in staged label')
+  prompt.clear_staged(sess1)
+end)
+
+-- ---------------------------------------------------------------------
 -- 6b. Staging renders REAL `# staged:` lines at the bottom of the compose
 --     buffer (gitcommit-style), each carrying a Comment extmark.
 -- ---------------------------------------------------------------------

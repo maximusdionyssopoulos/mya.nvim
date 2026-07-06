@@ -208,6 +208,32 @@ function M.render_event(event)
         add(l, 1, 'MyaLogThought')
       end
       foldtext[1] = ('⏵ reasoning (%d lines)'):format(#text_lines)
+    elseif event.block then
+      -- A non-text user content block: a staged `:Mya include` (resource) or
+      -- any other block echoed back. Render a visible `» included:` header
+      -- with the body folded beneath it (gitcommit / tool-call style), so
+      -- attached context reads properly in the log instead of a bare
+      -- `[resource]` placeholder.
+      local block = event.block
+      local res = type(block.resource) == 'table' and block.resource or nil
+      if block.type == 'resource' and res then
+        local label = res.name or (type(res.uri) == 'string' and res.uri:gsub('^file://', '')) or 'resource'
+        add('» included: ' .. label, 0, 'MyaLogLocation')
+        local body = vim.split(res.text or '', '\n', { plain = true })
+        if body[#body] == '' then
+          table.remove(body) -- files usually carry a trailing newline
+        end
+        for _, l in ipairs(body) do
+          add('  ' .. l, 1)
+        end
+        if #body > 0 then
+          foldtext[2] = ('⏵ included: %s (%d lines)'):format((label:gsub('[\r\n]+', ' ')), #body)
+        end
+      elseif block.type == 'resource_link' then
+        add('» linked: ' .. tostring(block.uri or block.name or 'resource'), 0, 'MyaLogLocation')
+      else
+        add(('[%s]'):format(tostring(block.type or 'content')), 0, 'MyaLogMeta')
+      end
     else -- user: plain text under the turn header
       for _, l in ipairs(text_lines) do
         add(l, 0)

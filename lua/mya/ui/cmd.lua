@@ -3,7 +3,7 @@
 --- wiring shim (module reload during development just works).
 ---
 --- Subcommands: (none) -> dashboard, `new <agent>`, `open <agent>[/<id>]`,
---- `send [{text}]`, `cancel`, `include [path...]`, `qf`, `review`, `config`,
+--- `send [{text}]`, `cancel`, `include [path...] [-- note]`, `qf`, `review`, `config`,
 --- `model [value]`, `plan`, `log`.
 ---
 --- ## Session targeting (fugitive-style ambient session)

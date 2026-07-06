@@ -223,7 +223,7 @@ recently entered.
                          (`session/cancel`). Same as |mya-C-c| in the log
                          buffer.
 
-:{range}Mya include [{path} ...]                              *:Mya_include*
+:{range}Mya include [{path} ...] [-- {note}]                  *:Mya_include*
                          Stage context for the NEXT prompt sent to the
                          current session (see |mya-current-session|):
                            - `:Mya include` with no args and no range:
@@ -232,11 +232,25 @@ recently entered.
                              file by path (tab-completes file paths).
                            - `:{range}Mya include` (a range, no paths):
                              attaches those lines of the current buffer.
-                         Staged blocks show as real `# staged: <label>`
+                         Attach a {note} to travel WITH the include -- the
+                         mini-review instruction for that bit, so one main
+                         prompt can drive several annotated snippets:
+                           - `:'<,'>Mya include check this off-by-one`
+                             (with a range, all trailing text is the note).
+                           - `:Mya include foo.lua -- review error handling`
+                             (with paths, `--` separates them from the note;
+                             the note applies to each file).
+                           - `:Mya include -- explain this file` notes the
+                             current buffer's file.
+                         The note is prepended to the attached content (the
+                         agent reads it inline) and shown in the staged
+                         label. Staged blocks show as real `# staged: <label>`
                          comment lines below the compose buffer's draft
                          (gitcommit-style): delete a line to unstage that
                          block. The lines are stripped from the sent
                          message, and staging is cleared after each submit.
+                         Once sent, each include renders in the log as a
+                         foldable `» included: <label>` block.
 
 :Mya config                                                    *:Mya_config*
                          Open a `vim.ui.select` picker over the session's

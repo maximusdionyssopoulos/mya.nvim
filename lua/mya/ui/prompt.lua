@@ -137,10 +137,13 @@ function M.clear_staged(sess)
 end
 
 --- Stage one file as a `resource` block (loaded-buffer content wins over
---- disk, same as fs/read_text_file).
+--- disk, same as fs/read_text_file). An optional `note` is the mini-review
+--- instruction that travels WITH the file: it is prepended to the resource
+--- text (so the agent reads it inline) and folded into the label / `name`.
 ---@param sess mya.Session
 ---@param path string relative (to session cwd) or absolute
-function M.stage_file(sess, path)
+---@param note string? annotation to attach to this include
+function M.stage_file(sess, path, note)
   local abs = path
   if not abs:match '^/' then
     abs = (sess.cwd and sess.cwd ~= '' and sess.cwd or vim.fn.getcwd()) .. '/' .. abs
@@ -161,17 +164,27 @@ function M.stage_file(sess, path)
     f:close()
   end
 
-  local block = { type = 'resource', resource = { uri = 'file://' .. abs, text = text } }
-  M.stage(sess, block, vim.fn.fnamemodify(abs, ':.'))
+  local rel = vim.fn.fnamemodify(abs, ':.')
+  local label = rel
+  if note and note ~= '' then
+    label = rel .. ' — ' .. note
+    text = ('%s:\n%s'):format(label, text)
+  end
+  local block = { type = 'resource', resource = { uri = 'file://' .. abs, text = text, name = label } }
+  M.stage(sess, block, label)
 end
 
 --- Stage a line range of `bufnr` (default: current buffer) as a `resource`
 --- block. This is what `:{range}Mya include` and `:{range}Mya send` share.
+--- An optional `note` (the mini-review instruction) is folded into the
+--- resource header, so the agent reads "<file> (<span>) — <note>:" above the
+--- snippet.
 ---@param sess mya.Session
 ---@param line1 integer
 ---@param line2 integer
 ---@param bufnr integer?
-function M.stage_range(sess, line1, line2, bufnr)
+---@param note string? annotation to attach to this range
+function M.stage_range(sess, line1, line2, bufnr, note)
   bufnr = bufnr or 0
   local path = api.nvim_buf_get_name(bufnr)
   if path == '' then
@@ -180,32 +193,67 @@ function M.stage_range(sess, line1, line2, bufnr)
   local lines = api.nvim_buf_get_lines(bufnr, line1 - 1, line2, false)
   local span = ('#L%d-L%d'):format(line1, line2)
   local rel = vim.fn.fnamemodify(path, ':.')
-  local text = ('%s (%s):\n%s'):format(rel, span, table.concat(lines, '\n'))
+  local label = ('%s (%s)'):format(rel, span)
+  if note and note ~= '' then
+    label = label .. ' — ' .. note
+  end
+  local text = ('%s:\n%s'):format(label, table.concat(lines, '\n'))
   local block = {
     type = 'resource',
-    resource = { uri = 'file://' .. path .. span, text = text, name = rel .. span },
+    resource = { uri = 'file://' .. path .. span, text = text, name = label },
   }
-  M.stage(sess, block, rel .. span)
+  M.stage(sess, block, label)
+end
+
+--- Split `:Mya include` fargs into file paths and an optional trailing note.
+--- A literal `--` token is the paths/note separator (everything after it is
+--- the note); with a range and no `--`, ALL args are the note (a range needs
+--- no path). Otherwise the args are paths (the backward-compatible form).
+---@param args string[]
+---@param has_range boolean
+---@return string[] paths, string? note
+local function split_include_args(args, has_range)
+  for i, a in ipairs(args) do
+    if a == '--' then
+      local paths, note = {}, {}
+      for j = 1, i - 1 do
+        paths[#paths + 1] = args[j]
+      end
+      for j = i + 1, #args do
+        note[#note + 1] = args[j]
+      end
+      local n = table.concat(note, ' ')
+      return paths, n ~= '' and n or nil
+    end
+  end
+  if has_range then
+    local n = table.concat(args, ' ')
+    return {}, n ~= '' and n or nil
+  end
+  return args, nil
 end
 
 --- `:Mya include` implementation (called by `ui/cmd.lua`). `opts` is the
 --- `nvim_create_user_command` callback table (for `.range`/`.line1`/`.line2`);
---- `paths` is the subcommand's remaining fargs (file paths), if any.
+--- `args` is the subcommand's remaining fargs — file paths and/or a `--`
+--- separated note (see `split_include_args`).
 ---@param opts table
----@param paths string[]
-function M.cmd_include(opts, paths)
+---@param args string[]
+function M.cmd_include(opts, args)
   local sess = M.resolve()
   if not sess then
     error('[mya] no current session; open one with :Mya or :Mya open', 0)
   end
+  local has_range = opts.range and opts.range > 0
+  local paths, note = split_include_args(args, has_range)
   if #paths > 0 then
     for _, p in ipairs(paths) do
-      M.stage_file(sess, p)
+      M.stage_file(sess, p, note)
     end
-  elseif opts.range and opts.range > 0 then
-    M.stage_range(sess, opts.line1, opts.line2)
+  elseif has_range then
+    M.stage_range(sess, opts.line1, opts.line2, nil, note)
   else
-    M.stage_file(sess, api.nvim_buf_get_name(0))
+    M.stage_file(sess, api.nvim_buf_get_name(0), note)
   end
 end
 
