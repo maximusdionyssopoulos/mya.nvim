@@ -244,6 +244,18 @@ recently entered.
                          lacking those, its deprecated `modes`. Same as |cco|
                          in the log buffer.
 
+:Mya model [{value}]                                            *:Mya_model*
+                         Fast path to just the model config option. With a
+                         {value}, set that model directly -- {value} is the
+                         model option's value id, tab-completed on the
+                         cmdline (`set wildoptions+=fuzzy` for fuzzy matching,
+                         no picker plugin required). With no {value}, opens a
+                         `vim.ui.select` scoped to the model values (whatever
+                         `vim.ui.select` frontend you use -- telescope,
+                         fzf-lua, snacks, mini.pick, dressing -- gives you a
+                         fuzzy list for free). Notifies if the session has no
+                         model option; use |:Mya_config| for the others.
+
 :Mya qf                                                            *:Mya_qf*
                          Fill the quickfix list with every edit/delete/move
                          tool call in the session's history so far (one
@@ -272,8 +284,9 @@ recently entered.
 
 Tab-completion is wired for the subcommand name, `:Mya new <agent>` (against
 configured agent names), `:Mya open <agent>/<id>` (against known sessions),
-`:Mya include <path>` (file paths), and `:Mya send /<command>` (against the
-current session's `available_commands`). Agent slash commands are ordinary
+`:Mya include <path>` (file paths), `:Mya model <value>` (against the current
+session's model value ids), and `:Mya send /<command>` (against the current
+session's `available_commands`). Agent slash commands are ordinary
 prompt text on the wire (the agent parses the leading `/<name>` itself), so
 the cmdline is their one completion surface -- there is no in-buffer slash
 magic.

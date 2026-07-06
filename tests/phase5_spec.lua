@@ -557,6 +557,41 @@ T.test(':Mya config picks an option via vim.ui.select and updates the statusline
 end)
 
 -- ---------------------------------------------------------------------
+-- 10b. :Mya model [value]: native-completion fast path over :Mya config.
+-- ---------------------------------------------------------------------
+T.test(':Mya model completes value ids and sets the model directly', function()
+  local sess = new_session 'config_ag'
+  vim.cmd.edit('mya://config_ag/' .. sess.id .. '/log')
+
+  -- Completion covers the model option's value ids (not `mode`/`variant`).
+  local cands = cmd.complete('', 'Mya model ', 10)
+  local has_sonnet, has_opus, has_mode = false, false, false
+  for _, c in ipairs(cands) do
+    has_sonnet = has_sonnet or c == 'sonnet'
+    has_opus = has_opus or c == 'opus'
+    has_mode = has_mode or c == 'code' or c == 'chat'
+  end
+  T.ok(has_sonnet and has_opus, 'model value ids completed: ' .. vim.inspect(cands))
+  T.ok(not has_mode, 'model completion must not leak mode/variant values: ' .. vim.inspect(cands))
+  T.eq(cmd.complete('op', 'Mya model op', 12), { 'opus' }, 'arglead filters model candidates')
+
+  -- `:Mya model opus` sets it directly — no vim.ui.select involved.
+  local ok, err = pcall(cmd.run, { fargs = { 'model', 'opus' }, range = 0 })
+  T.ok(ok, 'cmd.run must not raise: ' .. tostring(err))
+  T.wait(3000, function()
+    for _, o in ipairs(sess.config_options or {}) do
+      if o.id == 'model' then
+        return o.currentValue == 'opus'
+      end
+    end
+    return false
+  end)
+
+  local comp = statusline.component(sess)
+  T.ok(comp:find('claude%-opus') ~= nil, 'statusline reflects the new model: ' .. comp)
+end)
+
+-- ---------------------------------------------------------------------
 -- 11. Spinner: while prompting, the log buffer has the working virt_lines
 --     extmark (existence only — not asserting animation frames).
 -- ---------------------------------------------------------------------

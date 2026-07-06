@@ -478,6 +478,21 @@ end
 -- Config picker (`:Mya config` / `co` map)
 -- ---------------------------------------------------------------------
 
+--- `session/set_config_option` with the standard error notify. Shared by the
+--- `:Mya config` picker and `:Mya model`.
+---@param sess mya.Session
+---@param opt_id string
+---@param value any
+local function set_option(sess, opt_id, value)
+  sess:set_config_option(opt_id, value, function(err)
+    if err then
+      vim.schedule(function()
+        pcall(vim.notify, '[mya] set_config_option failed: ' .. tostring(err.message or vim.inspect(err)), vim.log.levels.ERROR)
+      end)
+    end
+  end)
+end
+
 --- Flatten a SessionConfigOption's `options` (handles the grouped
 --- `SessionConfigSelectGroup` form: `{ name, options = [...] }`).
 ---@param options table[]?
@@ -525,13 +540,7 @@ function M.config_picker(sess)
         if not v then
           return
         end
-        sess:set_config_option(opt.id, v.value, function(err)
-          if err then
-            vim.schedule(function()
-              pcall(vim.notify, '[mya] set_config_option failed: ' .. tostring(err.message or vim.inspect(err)), vim.log.levels.ERROR)
-            end)
-          end
-        end)
+        set_option(sess, opt.id, v.value)
       end)
     end)
     return
@@ -559,6 +568,68 @@ function M.config_picker(sess)
   end
 
   vim.notify('[mya] no config options or modes available for this session', vim.log.levels.INFO)
+end
+
+-- ---------------------------------------------------------------------
+-- Model picker (`:Mya model [value]`) — a fast path over `:Mya config`
+-- ---------------------------------------------------------------------
+
+--- The session's model config option plus its flattened value list, if the
+--- agent advertises one (statusline's `is_model` heuristic).
+---@param sess mya.Session
+---@return table? opt, table[] values
+local function model_option(sess)
+  local opt = require('mya.statusline').model_option(sess)
+  return opt, opt and flatten_options(opt.options) or {}
+end
+
+--- `:Mya model` completion candidates: the model option's value ids (stable,
+--- space-free — the display `name` is not the completion surface).
+---@param sess mya.Session
+---@return string[]
+function M.model_value_candidates(sess)
+  local _, values = model_option(sess)
+  local out = {}
+  for _, v in ipairs(values) do
+    if v.value ~= nil then
+      out[#out + 1] = tostring(v.value)
+    end
+  end
+  return out
+end
+
+--- `:Mya model [value]`. With `value`, set that model directly (matched by
+--- value id against the model option's values — this is the native-completion
+--- fast path). With no `value`, fall back to a `vim.ui.select` over just the
+--- model values (the normal picker, scoped to model).
+---@param sess mya.Session
+---@param value string?
+function M.set_model(sess, value)
+  local opt, values = model_option(sess)
+  if not opt then
+    vim.notify('[mya] this session has no model config option (try :Mya config)', vim.log.levels.INFO)
+    return
+  end
+  if value and value ~= '' then
+    for _, v in ipairs(values) do
+      if tostring(v.value) == value then
+        set_option(sess, opt.id, v.value)
+        return
+      end
+    end
+    vim.notify(('[mya] no such model: %q'):format(value), vim.log.levels.ERROR)
+    return
+  end
+  vim.ui.select(values, {
+    prompt = ('[mya] %s:'):format(opt.name or opt.id),
+    format_item = function(v)
+      return v.name or v.value
+    end,
+  }, function(v)
+    if v then
+      set_option(sess, opt.id, v.value)
+    end
+  end)
 end
 
 --- Test/introspection: the compose buffer state for a session, if any.

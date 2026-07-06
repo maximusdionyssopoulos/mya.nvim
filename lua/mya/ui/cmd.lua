@@ -4,7 +4,7 @@
 ---
 --- Subcommands: (none) -> dashboard, `new <agent>`, `open <agent>[/<id>]`,
 --- `send [{text}]`, `cancel`, `include [path...]`, `qf`, `review`, `config`,
---- `plan`, `log`.
+--- `model [value]`, `plan`, `log`.
 ---
 --- ## Session targeting (fugitive-style ambient session)
 ---
@@ -24,7 +24,7 @@
 
 local M = {}
 
-local SUBCOMMANDS = { 'new', 'open', 'send', 'cancel', 'include', 'qf', 'review', 'config', 'plan', 'log' }
+local SUBCOMMANDS = { 'new', 'open', 'send', 'cancel', 'include', 'qf', 'review', 'config', 'model', 'plan', 'log' }
 
 local NO_SESSION_MSG = '[mya] no current session (use :Mya, :Mya open, or :Mya new <agent>)'
 
@@ -159,6 +159,8 @@ function M.run(opts)
     sess:cancel()
   elseif sub == 'config' then
     prompt.config_picker(sess)
+  elseif sub == 'model' then
+    prompt.set_model(sess, rest[1])
   elseif sub == 'qf' then
     local n = require('mya.client').populate_session_qf(sess)
     vim.notify(('[mya] quickfix: %d entries'):format(n), vim.log.levels.INFO)
@@ -250,6 +252,13 @@ function M.complete(arglead, cmdline, _cursorpos)
 
   if sub == 'include' then
     return vim.fn.getcompletion(arglead, 'file')
+  end
+
+  if sub == 'model' then
+    -- Model value ids for the current session (`:Mya model <Tab>`). With
+    -- `set wildoptions+=fuzzy` these fuzzy-match; no picker plugin needed.
+    local sess = require('mya.ui.prompt').resolve()
+    return sess and filter(require('mya.ui.prompt').model_value_candidates(sess)) or {}
   end
 
   if sub == 'send' then

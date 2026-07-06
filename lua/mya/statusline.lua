@@ -147,6 +147,14 @@ function M.current_display(opt)
   return current_display(opt)
 end
 
+--- Public: the session's "model" config option (same heuristic as the
+--- statusline component), if the agent advertises one — for `:Mya model`.
+---@param session mya.Session?
+---@return table?
+function M.model_option(session)
+  return session and find_option(session.config_options, is_model) or nil
+end
+
 --- Build the component string for a session (or nil).
 ---@param session mya.Session? in-memory session (reads config_options, usage, agent_name)
 ---@return string
