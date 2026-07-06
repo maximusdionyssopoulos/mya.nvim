@@ -1,6 +1,11 @@
---- Session dashboard: `:Mya` with no args opens (or focuses) a plain scratch
---- buffer named `mya-dashboard` (deliberately NOT the mya:// BufReadCmd
---- scheme, same pattern as `ui/review.lua`'s `mya-review://`).
+--- Session dashboard: `:Mya` with no args opens (or focuses) the
+--- `mya://dashboard` buffer — a real view in the mya:// scheme (routed
+--- through the same BufReadCmd as the log/plan views, in `ui/buf.lua`), not
+--- a throwaway scratch. Because it is an mya:// buffer, `:edit!` re-reads it,
+--- and that is how you REFRESH: fugitive has no `R`, you just `:e` the
+--- status buffer to re-run its query. Re-reading re-runs the whole agent
+--- fetch cycle below; `M.attach` (the BufReadCmd handler) is idempotent so a
+--- reload tears down the old subscriptions and rebuilds cleanly.
 ---
 --- ## Status, not index (fugitive `:G` model)
 ---
@@ -23,8 +28,8 @@
 ---
 --- Maps follow fugitive: `<CR>` opens in the CURRENT window, `o`/`gO`/`O`
 --- split/vsplit/tab, `=` toggles an inline preview (pending edits + last
---- message), `cc` composes a prompt, `n` new session, `D` delete, `R`
---- refresh.
+--- message), `cc` composes a prompt, `n` new session, `D` delete. There is
+--- no refresh map — `:edit!` (`:e!`) re-reads the buffer, fugitive-style.
 ---
 --- Live refresh: subscribes to `on_status_change` of every in-memory session
 --- currently shown, re-rendering (no re-fetch) on change; a shared
@@ -709,9 +714,6 @@ local function setup_maps(state)
   map(keys.delete_session, function()
     delete_at_cursor(state)
   end, '[mya] delete session')
-  map(keys.refresh, function()
-    refresh(state)
-  end, '[mya] refresh dashboard')
   map(keys.close, function()
     if #api.nvim_list_wins() > 1 then
       pcall(api.nvim_win_close, 0, false)
@@ -726,53 +728,78 @@ end
 -- Buffer lifecycle
 -- ---------------------------------------------------------------------
 
----@return integer bufnr
-local function ensure_buffer()
-  if dash_buf and api.nvim_buf_is_valid(dash_buf) then
-    return dash_buf
+--- Tear down the live bits of a dashboard state — status subscriptions and
+--- the spinner ticker. Run both on BufWipeout and before an `:edit!`
+--- re-attach rebuilds the state.
+---@param state table
+local function teardown(state)
+  for _, unsub in pairs(state.status_subs) do
+    pcall(unsub)
   end
-  local buf = api.nvim_create_buf(false, true)
-  api.nvim_buf_set_name(buf, 'mya-dashboard')
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'hide'
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].filetype = 'mya-dashboard'
+  state.status_subs = {}
+  spinner.unregister(state.buf)
+end
 
-  dash_buf = buf
-  dash_state = { buf = buf, groups = {}, line_map = {}, prompting_lines = {}, status_subs = {}, expanded = {} }
+--- BufReadCmd handler for `mya://dashboard` (dispatched by `ui/buf`). Sets
+--- the buffer options, wires the maps, and kicks off the fetch cycle.
+---
+--- Idempotent by design: `:edit!` re-fires this on the same buffer, so we
+--- drop the previous subscriptions and rebuild fresh state — that reload IS
+--- the refresh. The `=` preview expansions survive it (fugitive keeps your
+--- place on `:e` too); everything else is recomputed.
+---@param bufnr integer
+function M.attach(bufnr)
+  if not api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  vim.bo[bufnr].buftype = 'nofile'
+  vim.bo[bufnr].bufhidden = 'hide'
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].filetype = 'mya-dashboard'
+
+  local reattach = dash_state ~= nil and dash_state.buf == bufnr
+  local expanded = reattach and dash_state.expanded or {}
+  if reattach then
+    teardown(dash_state)
+  end
+
+  dash_buf = bufnr
+  dash_state = { buf = bufnr, groups = {}, line_map = {}, prompting_lines = {}, status_subs = {}, expanded = expanded }
   setup_maps(dash_state)
 
   api.nvim_create_autocmd('BufWipeout', {
-    buffer = buf,
-    once = true,
+    group = api.nvim_create_augroup('mya_dashboard_' .. bufnr, { clear = true }),
+    buffer = bufnr,
     callback = function()
-      for _, unsub in pairs(dash_state.status_subs) do
-        pcall(unsub)
+      if dash_state and dash_state.buf == bufnr then
+        teardown(dash_state)
+        dash_buf = nil
+        dash_state = nil
       end
-      spinner.unregister(buf)
-      dash_buf = nil
-      dash_state = nil
     end,
+    desc = '[mya] tear down the dashboard on wipeout',
   })
 
-  return buf
+  refresh(dash_state)
 end
 
---- Open (or focus) the dashboard, and (re)fetch its data.
+--- Open (or focus) the dashboard. Editing `mya://dashboard` fires the
+--- BufReadCmd (`ui/buf` → `M.attach`), which fetches. If the dashboard is
+--- already shown in this tab, jump to that window and `:edit` it in place —
+--- reloading it is the refresh — instead of stealing the current window.
 ---@return integer bufnr
 function M.open()
-  local buf = ensure_buffer()
+  local u = require('mya.url').DASHBOARD
   for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
-    if api.nvim_win_get_buf(win) == buf then
+    if api.nvim_buf_get_name(api.nvim_win_get_buf(win)) == u then
       api.nvim_set_current_win(win)
-      refresh(dash_state)
-      return buf
+      vim.cmd 'edit'
+      return api.nvim_get_current_buf()
     end
   end
-  api.nvim_set_current_buf(buf)
-  refresh(dash_state)
-  return buf
+  vim.cmd('edit ' .. vim.fn.fnameescape(u))
+  return api.nvim_get_current_buf()
 end
 
 --- Test/introspection access to the dashboard's render state, if open.

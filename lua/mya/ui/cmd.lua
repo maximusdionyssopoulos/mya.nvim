@@ -4,12 +4,12 @@
 ---
 --- Subcommands: (none) -> dashboard, `new <agent>`, `open <agent>[/<id>]`,
 --- `send [{text}]`, `cancel`, `include [path...]`, `qf`, `review`, `config`,
---- `log`.
+--- `plan`, `log`.
 ---
 --- ## Session targeting (fugitive-style ambient session)
 ---
 --- Every session-scoped subcommand (`send`/`cancel`/`config`/`qf`/`review`/
---- `include`) resolves its target through `ui/prompt.M.resolve()`: the
+--- `plan`/`include`) resolves its target through `ui/prompt.M.resolve()`: the
 --- current buffer's session when it has one (mya:// view or compose buffer),
 --- otherwise the most recently entered session buffer. So `:'<,'>Mya send
 --- fix this` works from any file buffer, the way `:Ggrep` works from any
@@ -24,7 +24,7 @@
 
 local M = {}
 
-local SUBCOMMANDS = { 'new', 'open', 'send', 'cancel', 'include', 'qf', 'review', 'config', 'log' }
+local SUBCOMMANDS = { 'new', 'open', 'send', 'cancel', 'include', 'qf', 'review', 'config', 'plan', 'log' }
 
 local NO_SESSION_MSG = '[mya] no current session (use :Mya, :Mya open, or :Mya new <agent>)'
 
@@ -167,6 +167,8 @@ function M.run(opts)
     end
   elseif sub == 'review' then
     require('mya.ui.review').open(sess)
+  elseif sub == 'plan' then
+    require('mya.ui.plan').open(sess)
   else
     vim.notify('[mya] unknown subcommand: ' .. tostring(sub), vim.log.levels.ERROR)
   end

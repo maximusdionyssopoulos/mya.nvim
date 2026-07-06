@@ -55,7 +55,6 @@ local M = {}
 ---@field compose mya.Keymap? compose a prompt for the session under cursor
 ---@field new_session mya.Keymap? new session
 ---@field delete_session mya.Keymap? delete session
----@field refresh mya.Keymap? refresh dashboard
 ---@field close mya.Keymap? close dashboard window
 ---@field help mya.Keymap? open the dashboard's help section
 
@@ -66,6 +65,7 @@ local M = {}
 ---@field compose mya.Keymap? compose a prompt for this session
 ---@field config mya.Keymap? change model/mode/variant
 ---@field review mya.Keymap? open the review buffer for this session
+---@field open_plan mya.Keymap? open the plan buffer for this session
 ---@field cancel mya.Keymap? cancel the in-flight turn
 ---@field help mya.Keymap? open the log buffer's help section
 ---@field close_output mya.Keymap? close a terminal output view
@@ -120,7 +120,6 @@ local defaults = {
       compose = 'cc',
       new_session = 'n',
       delete_session = 'D',
-      refresh = 'R',
       close = 'q',
       help = 'g?',
     },
@@ -131,6 +130,7 @@ local defaults = {
       compose = 'cc',
       config = 'co',
       review = 'dr',
+      open_plan = 'cp',
       cancel = '<C-c>',
       help = 'g?',
       close_output = 'q',

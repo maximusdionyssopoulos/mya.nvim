@@ -2,11 +2,27 @@
 --- BufReadCmd routing and buffer registry on top of this; Phase 7's
 --- statusline resolves a session from an mya:// buffer name through it.
 ---
---- Shape: `mya://<agent>/<session>/<view>` — exactly three path segments,
---- none empty. `view` is `log` | `plan` (not enforced here; the parser is
---- purely structural so new views don't need a parser change).
+--- Two shapes live under the scheme:
+---   `mya://<agent>/<session>/<view>` — a session view; exactly three path
+---     segments, none empty. `view` is `log` | `plan` (not enforced here;
+---     the parser is purely structural so new views don't need a change).
+---   `mya://dashboard`               — the session dashboard (`M.DASHBOARD`).
+---     A scheme-level singleton, not tied to any agent/session, so it can't
+---     collide with a session URL (those always have three segments).
 
 local M = {}
+
+--- The dashboard's URL. It rides the mya:// scheme (routed through the same
+--- BufReadCmd as the session views) so `:edit!` re-reads it — that is how
+--- the dashboard refreshes, the fugitive way, with no dedicated `R` map.
+M.DASHBOARD = 'mya://dashboard'
+
+--- Whether `str` is the dashboard URL.
+---@param str any
+---@return boolean
+function M.is_dashboard(str)
+  return str == M.DASHBOARD
+end
 
 ---@class mya.Url
 ---@field agent string

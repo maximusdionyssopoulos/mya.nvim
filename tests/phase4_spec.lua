@@ -135,9 +135,9 @@ T.test('dashboard: renders Sessions/Agents sections with per-agent notes', funct
   local buf = dashboard.open()
   T.eq(vim.bo[buf].buftype, 'nofile')
   T.eq(vim.bo[buf].filetype, 'mya-dashboard')
-  -- nvim_buf_set_name resolves a bare (no "://") name against cwd, same as
-  -- any other buffer name; assert the meaningful part.
-  T.eq(vim.fn.fnamemodify(api.nvim_buf_get_name(buf), ':t'), 'mya-dashboard')
+  -- The dashboard is a real mya:// view now (BufReadCmd-routed, refreshed
+  -- with :edit!), so its name is the scheme URL, not a cwd-resolved scratch.
+  T.eq(api.nvim_buf_get_name(buf), 'mya://dashboard')
 
   wait_settled()
 
@@ -276,9 +276,9 @@ end
 
 -- ---------------------------------------------------------------------
 -- 3. D deletes a session over ACP when the agent advertises
---    sessionCapabilities.delete (with confirm); R refreshes.
+--    sessionCapabilities.delete (with confirm); :edit! refreshes.
 -- ---------------------------------------------------------------------
-T.test('dashboard: D deletes the session under cursor via session/delete; R refreshes', function()
+T.test('dashboard: D deletes the session under cursor via session/delete; :edit! refreshes', function()
   local s2 = new_session 'del_ag'
 
   dashboard.open()
@@ -291,11 +291,12 @@ T.test('dashboard: D deletes the session under cursor via session/delete; R refr
   end)
   T.ok(session.get('del_ag', s2.id) == nil, 'session removed from the registry after delete')
 
-  -- R: refresh runs without error and settles again.
+  -- :edit! re-fires the BufReadCmd (fugitive-style refresh): it re-reads the
+  -- dashboard buffer, re-running the fetch cycle without error, and settles.
   local ok2 = pcall(function()
-    api.nvim_feedkeys('R', 'x', false)
+    vim.cmd 'edit!'
   end)
-  T.ok(ok2, 'R refresh ran without error')
+  T.ok(ok2, ':edit! refresh ran without error')
   wait_settled()
 end)
 

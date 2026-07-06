@@ -107,7 +107,6 @@ can then bind your own through the buffer's filetype). Defaults: >
         compose = 'cc',          -- compose a prompt for session under cursor
         new_session = 'n',       -- new session
         delete_session = 'D',    -- delete session
-        refresh = 'R',           -- refresh dashboard
         close = 'q',             -- close dashboard window
         help = 'g?',             -- open this help section
       },
@@ -118,6 +117,7 @@ can then bind your own through the buffer's filetype). Defaults: >
         compose = 'cc',          -- compose a prompt for this session
         config = 'co',           -- change model/mode/variant
         review = 'dr',           -- open the review buffer
+        open_plan = 'cp',        -- open the plan buffer
         cancel = '<C-c>',        -- cancel the in-flight turn
         help = 'g?',             -- open this help section
         close_output = 'q',      -- close a terminal output view
@@ -202,7 +202,7 @@ minimal setups or as a fallback UI.
 
                                                       *mya-current-session*
 Session-scoped subcommands (`send`, `cancel`, `include`, `config`, `qf`,
-`review`) act on the AMBIENT CURRENT SESSION and therefore work from any
+`review`, `plan`) act on the AMBIENT CURRENT SESSION and therefore work from any
 buffer, fugitive-style: the current buffer's session when it has one (an
 `mya://` view or a compose buffer), otherwise the session buffer you most
 recently entered.
@@ -255,6 +255,14 @@ recently entered.
                          `q`, or with `review.open = 'manual'`. Same as
                          |mya-dr| in the log buffer.
 
+:Mya plan                                                        *:Mya_plan*
+                         Open (or focus) the |mya-plan| buffer for the
+                         current session in a split, keeping the log
+                         transcript visible. If a window in the current tab
+                         already shows the plan, jumps to it instead of
+                         opening a duplicate. Same as |mya-cp| in the log
+                         buffer.
+
 :Mya log                                                          *:Mya_log*
                          Open the plugin's own rpc/trace log file
                          (`require('mya.util').log_path()`, defaults to
@@ -273,9 +281,10 @@ magic.
 ==============================================================================
 4. Dashboard                                                    *mya-dashboard*
 
-`:Mya` opens a scratch buffer (NOT an `mya://` buffer) named `mya-dashboard`.
-Like fugitive's `:G` status window, it is organized around what needs YOU,
-not around a directory listing:
+`:Mya` opens the `mya://dashboard` buffer -- a real view in the `mya://`
+scheme (routed through the same BufReadCmd as the log/plan views), not a
+throwaway scratch. Like fugitive's `:G` status window, it is organized
+around what needs YOU, not around a directory listing:
 
     Needs review:   sessions blocked on a permission request; each pending
                     tool call's title renders as an indented child line
@@ -284,10 +293,14 @@ not around a directory listing:
     Agents:         one line per configured agent -- ready / loading… /
                     an error / "(no session listing)"
 
-On every open/refresh, each configured agent is initialized and its
-`session/list` fetched (paginating through all cursors) if it advertises
-the capability; agents that don't contribute only sessions created THIS
-instance.
+On every read, each configured agent is initialized and its `session/list`
+fetched (paginating through all cursors) if it advertises the capability;
+agents that don't contribute only sessions created THIS instance.
+
+Because the dashboard is an `mya://` buffer, you REFRESH it the Vim way, by
+re-reading the buffer -- `:edit!` (`:e!`) -- exactly as fugitive expects you
+to `:e` its status window. There is no dedicated refresh map; re-reading
+re-runs the whole fetch cycle.
 
 Each row shows: a live-status indicator, title (or session id), agent name,
 rendered line count, known model/effort/other config options, a relative
@@ -315,7 +328,6 @@ the defaults -- see |mya-keymaps| to change or disable any of them):
                Sends `session/delete` when the agent advertises the
                capability; otherwise runs the agent's
                |mya-session_delete_command| CLI fallback; otherwise warns.
-    R          Refresh (re-fetch `session/list` for every agent).
     q          Close the dashboard window (never the last window).
     g?         Jump to this section of the manual (like fugitive's g?).
 
@@ -352,6 +364,9 @@ Maps in the log buffer (defaults; configurable via |mya-keymaps|):
     dr                                                             *mya-dr*
                Open (or focus) the review buffer for this session (same
                as |:Mya_review|).
+    cp                                                             *mya-cp*
+               Open (or focus) the |mya-plan| buffer for this session in a
+               split (same as |:Mya_plan|).
     <C-c>                                                          *mya-C-c*
                Cancel the in-flight turn (`session/cancel`; same as
                |:Mya_cancel|).
@@ -364,8 +379,9 @@ Maps in the log buffer (defaults; configurable via |mya-keymaps|):
 as a checkbox list: `[ ]` pending, `[~]` in progress, `[x]` completed, with
 a `(!)` suffix on high-priority entries. Re-renders in full on every `plan`
 update -- plans are small enough that incremental diffing isn't worth it.
-It has no buffer-local maps of its own; use |:Mya_send| etc. from the
-session's log buffer.
+Open it with |:Mya_plan| or |mya-cp| from the log buffer (both split it
+below the transcript). It has no buffer-local maps of its own; use
+|:Mya_send| etc. from the session's log buffer.
 
 ==============================================================================
 7. Compose buffer                                    *mya-compose* *mya-prompt*

@@ -120,6 +120,25 @@ function M.detach(bufnr)
   end
 end
 
+--- Open (or focus) the plan view (`mya://<agent>/<session>/plan`) for a
+--- session. If a window in the current tab already shows it, jump there
+--- rather than opening a duplicate; otherwise open per `opts.split`
+--- (default: a horizontal split, keeping the log transcript visible). The
+--- renderer is wired by the mya:// BufReadCmd routing (ui/buf), so this only
+--- has to place the buffer in a window.
+---@param sess mya.Session
+---@param opts { split: "current"|"split"|"vsplit"|"tab"? }?
+function M.open(sess, opts)
+  local key = require('mya.url').format(sess.agent_name, sess.id, 'plan')
+  for _, win in ipairs(api.nvim_tabpage_list_wins(0)) do
+    if api.nvim_buf_get_name(api.nvim_win_get_buf(win)) == key then
+      api.nvim_set_current_win(win)
+      return
+    end
+  end
+  require('mya.ui.buf').open(sess.agent_name, sess.id, 'plan', opts or { split = 'split' })
+end
+
 --- Test/introspection access.
 ---@param bufnr integer
 ---@return table?

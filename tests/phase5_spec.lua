@@ -384,12 +384,13 @@ end)
 -- ---------------------------------------------------------------------
 T.test(':Mya completion covers subcommands, open targets, slash commands', function()
   local subs = cmd.complete('', 'Mya ', 4)
-  local has_open, has_send = false, false
+  local has_open, has_send, has_plan = false, false, false
   for _, s in ipairs(subs) do
     has_open = has_open or s == 'open'
     has_send = has_send or s == 'send'
+    has_plan = has_plan or s == 'plan'
   end
-  T.ok(has_open and has_send, 'subcommand completion: ' .. vim.inspect(subs))
+  T.ok(has_open and has_send and has_plan, 'subcommand completion: ' .. vim.inspect(subs))
 
   local targets = cmd.complete('', 'Mya open ', 9)
   local has_agent, has_session = false, false
@@ -465,6 +466,45 @@ T.test(':Mya review opens the review buffer from a session buffer', function()
   end
   T.ok(found_win ~= nil, 'a window shows the mya-review:// buffer')
   T.eq(vim.api.nvim_get_current_win(), found_win)
+end)
+
+-- ---------------------------------------------------------------------
+-- 9c. :Mya plan opens the session's plan buffer in a split; the log
+--     buffer's `cp` map is wired to the same opener, and reopening
+--     focuses the existing window instead of duplicating it.
+-- ---------------------------------------------------------------------
+T.test(':Mya plan opens the plan buffer and is idempotent; log `cp` is bound', function()
+  local sess = new_session 'basic_ag'
+  vim.cmd.edit('mya://basic_ag/' .. sess.id .. '/log')
+
+  -- The log buffer binds `cp` (open_plan) buffer-locally.
+  local m = vim.fn.maparg('cp', 'n', false, true)
+  T.ok(m and m.buffer == 1, 'cp is a buffer-local map in the log buffer: ' .. vim.inspect(m))
+
+  cmd.run { fargs = { 'plan' }, range = 0 }
+
+  local plan_name = 'mya://basic_ag/' .. sess.id .. '/plan'
+  local function plan_wins()
+    local wins = {}
+    for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      if vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)) == plan_name then
+        wins[#wins + 1] = win
+      end
+    end
+    return wins
+  end
+
+  local wins = plan_wins()
+  T.eq(#wins, 1, 'exactly one window shows the plan buffer')
+  T.eq(vim.api.nvim_get_current_win(), wins[1])
+  T.eq(vim.bo[vim.api.nvim_win_get_buf(wins[1])].filetype, 'myaplan')
+
+  -- Reopening from the plan window itself (its session resolves ambiently)
+  -- focuses the existing window rather than opening a duplicate.
+  cmd.run { fargs = { 'plan' }, range = 0 }
+  local again = plan_wins()
+  T.eq(#again, 1, 'no duplicate plan window on reopen')
+  T.eq(vim.api.nvim_get_current_win(), again[1])
 end)
 
 -- ---------------------------------------------------------------------

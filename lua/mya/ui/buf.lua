@@ -6,6 +6,11 @@
 --- BufReadCmd and re-attaches idempotently (renderers keep their single
 --- subscription); BufWipeout cleans up.
 ---
+--- The dashboard (`mya://dashboard`) also rides this BufReadCmd, but it is
+--- not a per-session view: it owns its own buffer setup and refresh cycle,
+--- so we hand the whole buffer to `ui/dashboard` and take no further part
+--- (no registry entry, no session bar).
+---
 --- Resolution order (concepts-v3):
 ---   1. session in memory        -> render + subscribe
 ---   2. agent supports loadSession -> session/load with a loading line
@@ -146,6 +151,10 @@ function M.attach(bufnr)
     return
   end
   local name = api.nvim_buf_get_name(bufnr)
+  if url.is_dashboard(name) then
+    require('mya.ui.dashboard').attach(bufnr)
+    return
+  end
   local parsed = url.parse(name)
   if not parsed then
     set_common_opts(bufnr, nil)
